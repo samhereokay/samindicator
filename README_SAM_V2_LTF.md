@@ -40,24 +40,17 @@ A comprehensive Pine Script indicator combining higher timeframe analysis, liqui
 - Display as lines or boxes
 - Auto-removes mitigated levels or shows them in faded color
 
-### 6. **Macro Features** (On-Chart & New Pane)
-- 24+ pre-configured macros for intraday trading
-- Time-based macro detection
-- **Auto-disables when chart timeframe > 15 minutes**
-- Visual representation with labels and boxes
-- Memory management to prevent lag
-
-### 7. **Separators**
+### 6. **Separators**
 - Period dividers on chart (hourly, daily, etc.)
 - Customizable color, style (solid/dashed/dotted), and width
 - Auto-adjusts with HTF mapping
 
-### 8. **SMT Divergences**
+### 7. **SMT Divergences**
 - Swing-based divergence detection
 - Multi-symbol comparison (e.g., ES1! vs YM1!)
 - Dashboard display option
 
-### 9. **Additional Tools**
+### 8. **Additional Tools**
 - **Higher Timeframe Liquidity Levels** - Liquidity analysis on multiple timeframes
 - **Table Display** - Summary table with customizable position and colors
 - **Alert System** - Get notified on key events
@@ -128,12 +121,6 @@ A comprehensive Pine Script indicator combining higher timeframe analysis, liqui
 2. Manually set the timeframe and separator timeframe inputs
 3. Use for custom timeframe combinations
 
-### Macro Trading
-1. Ensure chart is 15m or lower for macros
-2. Select preferred macro visualization (On Chart or New Pane)
-3. Enable specific macros using toggles (show1-show24, showPM1)
-4. Macros auto-disable on higher timeframes
-
 ---
 
 ## ⚙️ Technical Details
@@ -145,17 +132,6 @@ A comprehensive Pine Script indicator combining higher timeframe analysis, liqui
 60m chart → D (1d)
 Other     → Default tf value
 ```
-
-### Macro Auto-Disable Logic
-- **Enabled:** Chart timeframe ≤ 15 minutes
-- **Disabled:** Chart timeframe > 15 minutes (30m+)
-- Gracefully hides macros without throwing errors
-
-### Memory Management
-- Line and box cleanup for macro arrays
-- Prevents indicator lag on long-running charts
-- Automatic array pruning (>300 lines, >100 labels)
-
 ---
 
 ## 📝 Notes
@@ -169,7 +145,7 @@ Other     → Default tf value
 
 ## 🔧 Version Info
 
-**Name:** Sam V2 LTF  
+**Name:** Sam V2
 **Version:** 5  
 **Overlay:** Yes  
 **Max Bars Back:** 500  
@@ -191,7 +167,6 @@ Other     → Default tf value
 - [ ] Add indicator to 5m or 15m chart
 - [ ] Enable "Auto-change HTF & Separators" for automatic timeframe mapping
 - [ ] Enable "HTF Candle Countdown" to see timer
-- [ ] Select preferred macro display mode (On Chart or New Pane)
 - [ ] Customize colors and settings to your preference
 - [ ] Save template for future use
 
