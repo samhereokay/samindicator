@@ -1,0 +1,984 @@
+//@version=6
+indicator("SXM Elite++ v2", shorttitle="SXM Elite++ v2", overlay=true,
+     max_boxes_count=500, max_lines_count=500, max_labels_count=500, max_bars_back=5000)
+
+// ════════════════════════════════════════════════════════════════════════════
+//  SXM ELITE++ v2
+//  Modular rebuild: 90M/6H/Daily candle stack, structural SSMT/PSP, True Opens,
+//  CISD/TCISD, Turtle Soup, PDH/PDL/PWH/PWL, NDOG/NWOG.
+// ════════════════════════════════════════════════════════════════════════════
+
+// ───────────────────────────── GROUPS ─────────────────────────────
+g_sess  = "Session Alignment"
+g_lay   = "Candle Layout"
+g_tf    = "Multi-TF Candles"
+g_90m   = "90 Minute Colors"
+g_6h    = "6 Hour Colors"
+g_1d    = "Daily Colors"
+g_ssmt  = "SSMT / PSP Divergence"
+g_topen = "True Opens"
+g_cisd  = "CISD / TCISD"
+g_ts    = "Turtle Soup"
+g_pdhl  = "Previous Day / Week Levels"
+g_gap   = "NDOG / NWOG"
+g_lim   = "Object Limits"
+
+// ───────────────────────────── SESSION ALIGNMENT ─────────────────────────────
+i_sessMode = input.string("Auto", "Alignment Mode", options=["Auto", "Manual"], group=g_sess,
+     tooltip="Auto uses broker-local New York time to find the 17:00 futures/forex daily boundary. Manual lets you set it yourself.")
+i_dailyHr  = input.int(17, "Manual Daily Open Hour (NY time)", minval=0, maxval=23, group=g_sess)
+i_dailyMin = input.int(0,  "Manual Daily Open Minute", minval=0, maxval=59, group=g_sess)
+
+f_dailyAnchor() =>
+    int dt = time("D")
+    int hr = not na(dt) ? hour(dt, "America/New_York") : 17
+    int mn = not na(dt) ? minute(dt, "America/New_York") : 0
+    [i_sessMode == "Auto" ? hr : i_dailyHr, i_sessMode == "Auto" ? mn : i_dailyMin]
+
+[effHr, effMin] = f_dailyAnchor()
+
+// ───────────────────────────── LAYOUT ─────────────────────────────
+i_offset  = input.int(10, "Padding From Last Candle", minval=1, maxval=50, group=g_lay)
+i_buffer  = input.int(1,  "Space Between Candles", minval=0, maxval=4, group=g_lay)
+i_htfgap  = input.int(5,  "Gap Between TF Blocks", minval=1, maxval=20, group=g_lay)
+i_width   = input.int(1,  "Candle Width", minval=1, maxval=6, group=g_lay) * 2
+i_maxshow = input.int(4,  "Candles To Show (per block)", minval=1, maxval=5, group=g_lay)
+i_showLabel = input.bool(true, "Show TF Label", group=g_lay)
+i_showTimer = input.bool(true, "Show Time Remaining", group=g_lay)
+
+i_show90m = input.bool(true, "Show 90 Minute Candles", group=g_tf)
+i_show6h  = input.bool(true, "Show 6 Hour Candles", group=g_tf)
+i_show1d  = input.bool(true, "Show Daily Candles (replaces old 7H block)", group=g_tf)
+
+i_90mBullBody = input.color(color.new(#dbdbdb, 10), "Bull Body  ", inline="90b", group=g_90m)
+i_90mBearBody = input.color(color.new(#000000, 10), "Bear Body", inline="90b", group=g_90m)
+i_90mBullBrd  = input.color(color.new(#000000, 10), "Bull Border", inline="90c", group=g_90m)
+i_90mBearBrd  = input.color(color.new(#000000, 10), "Bear Border", inline="90c", group=g_90m)
+i_90mBullWick = input.color(color.new(#000000, 10), "Bull Wick  ", inline="90w", group=g_90m)
+i_90mBearWick = input.color(color.new(#000000, 10), "Bear Wick", inline="90w", group=g_90m)
+
+i_6hBullBody = input.color(color.new(#dbdbdb, 10), "Bull Body  ", inline="6b", group=g_6h)
+i_6hBearBody = input.color(color.new(#000000, 10), "Bear Body", inline="6b", group=g_6h)
+i_6hBullBrd  = input.color(color.new(#010201, 10), "Bull Border", inline="6c", group=g_6h)
+i_6hBearBrd  = input.color(color.new(#000000, 10), "Bear Border", inline="6c", group=g_6h)
+i_6hBullWick = input.color(color.new(#000000, 10), "Bull Wick  ", inline="6w", group=g_6h)
+i_6hBearWick = input.color(color.new(#000000, 10), "Bear Wick", inline="6w", group=g_6h)
+
+i_1dBullBody = input.color(color.new(#dbdbdb, 10), "Bull Body  ", inline="1b", group=g_1d)
+i_1dBearBody = input.color(color.new(#000000, 10), "Bear Body", inline="1b", group=g_1d)
+i_1dBullBrd  = input.color(color.new(#010201, 10), "Bull Border", inline="1c", group=g_1d)
+i_1dBearBrd  = input.color(color.new(#000000, 10), "Bear Border", inline="1c", group=g_1d)
+i_1dBullWick = input.color(color.new(#000000, 10), "Bull Wick  ", inline="1w", group=g_1d)
+i_1dBearWick = input.color(color.new(#000000, 10), "Bear Wick", inline="1w", group=g_1d)
+
+// ───────────────────────────── SSMT / PSP ─────────────────────────────
+i_ssmtShow      = input.bool(true, "Enable SSMT / SMT Divergence Engine", group=g_ssmt)
+i_ssmtMode      = input.string("Normal", "Detection Mode", options=["Strict", "Normal", "Aggressive"], group=g_ssmt)
+i_ssmtLeft      = input.int(3, "Pivot Left Bars", minval=1, group=g_ssmt)
+i_ssmtRight     = input.int(3, "Pivot Right Bars", minval=1, group=g_ssmt)
+i_ssmtMinAtr    = input.float(0.15, "Min Swing Significance (x ATR14)", minval=0.0, step=0.05, group=g_ssmt)
+i_ssmtAutoSym   = input.bool(true, "Auto-Detect Correlated Symbols", group=g_ssmt)
+i_ssmtSym1      = input.symbol("", "Manual Correlated Symbol A", group=g_ssmt)
+i_ssmtSym2      = input.symbol("", "Manual Correlated Symbol B", group=g_ssmt)
+i_ssmtInv1      = input.bool(false, "Invert Symbol A (e.g. DXY vs EURUSD)", group=g_ssmt)
+i_ssmtInv2      = input.bool(false, "Invert Symbol B", group=g_ssmt)
+i_ssmtBullCol   = input.color(color.new(#00c853, 20), "Bullish SSMT Color", group=g_ssmt)
+i_ssmtBearCol   = input.color(color.new(#ff1744, 20), "Bearish SSMT Color", group=g_ssmt)
+i_ssmtShowLine  = input.bool(true, "Show Connecting Line", group=g_ssmt)
+i_ssmtShowLbl   = input.bool(true, "Show Label", group=g_ssmt)
+
+// ───────────────────────────── TRUE OPENS ─────────────────────────────
+i_toShowDay   = input.bool(true, "True Day Open (00:00 NY)", group=g_topen)
+i_toShowWeek  = input.bool(true, "True Week Open (Mon 18:00 NY)", group=g_topen)
+i_toShowMonth = input.bool(true, "True Month Open (2nd Mon 18:00 NY)", group=g_topen)
+i_toShowSess  = input.bool(false, "True Session Opens (Asia/London/NY AM/NY PM)", group=g_topen)
+i_toColor     = input.color(#ff9900, "Line Color", group=g_topen)
+i_toStyle     = input.string("Solid", "Line Style", options=["Solid", "Dashed", "Dotted"], group=g_topen)
+i_toWidth     = input.int(1, "Line Width", minval=1, maxval=5, group=g_topen)
+i_toExtend    = input.bool(true, "Extend To Current Bar", group=g_topen)
+i_toLabels    = input.bool(true, "Show Labels", group=g_topen)
+
+// ───────────────────────────── CISD / TCISD ─────────────────────────────
+i_cisdShow      = input.bool(true, "Enable CISD", group=g_cisd)
+i_cisdMinDisp   = input.float(0.0, "Min Displacement (x ATR14, 0=off)", minval=0.0, step=0.05, group=g_cisd)
+i_cisdWickMode  = input.bool(false, "Allow Wick Confirmation (default = close only)", group=g_cisd)
+i_cisdBullCol   = input.color(color.new(#2962ff, 0), "Bullish CISD Color", group=g_cisd)
+i_cisdBearCol   = input.color(color.new(#e91e63, 0), "Bearish CISD Color", group=g_cisd)
+i_cisdExtend    = input.bool(true, "Extend Level Until Mitigated", group=g_cisd)
+
+i_tcisdShow     = input.bool(true, "Enable TCISD (Higher-Timeframe CISD)", group=g_cisd)
+i_tcisdTF       = input.timeframe("60", "TCISD Timeframe", group=g_cisd)
+i_tcisdBullCol  = input.color(color.new(#00bcd4, 0), "TCISD Bullish Color", group=g_cisd)
+i_tcisdBearCol  = input.color(color.new(#ff6d00, 0), "TCISD Bearish Color", group=g_cisd)
+
+// ───────────────────────────── TURTLE SOUP ─────────────────────────────
+i_tsShow      = input.bool(true, "Enable Turtle Soup", group=g_ts)
+i_tsLen       = input.int(20, "Lookback Length", minval=5, group=g_ts)
+i_tsPivotL    = input.int(3, "Pivot Strength", minval=1, group=g_ts)
+i_tsMinSweep  = input.float(0.05, "Min Sweep Distance (x ATR14)", minval=0.0, step=0.01, group=g_ts)
+i_tsMode      = input.string("Close Rejection", "Rejection Mode",
+     options=["Wick Rejection", "Close Rejection", "Strict Confirmation"], group=g_ts)
+i_tsMaxBars   = input.int(5, "Max Bars After Sweep For Confirmation", minval=1, maxval=50, group=g_ts)
+i_tsShowSweep = input.bool(true, "Show Sweep Line", group=g_ts)
+i_tsShowMark  = input.bool(true, "Show Confirmation Marker", group=g_ts)
+i_tsShowStop  = input.bool(true, "Show Stop / Reference Level", group=g_ts)
+i_tsBullCol   = input.color(color.new(#00e676, 0), "Bullish Turtle Soup Color", group=g_ts)
+i_tsBearCol   = input.color(color.new(#ff5252, 0), "Bearish Turtle Soup Color", group=g_ts)
+
+// ───────────────────────────── PDH/PDL/PWH/PWL ─────────────────────────────
+i_showPDH = input.bool(true, "Show PDH", inline="pd1", group=g_pdhl)
+i_pdhCol  = input.color(color.new(#787b86, 0), "", inline="pd1", group=g_pdhl)
+i_showPDL = input.bool(true, "Show PDL", inline="pd2", group=g_pdhl)
+i_pdlCol  = input.color(color.new(#787b86, 0), "", inline="pd2", group=g_pdhl)
+i_showPWH = input.bool(true, "Show PWH", inline="pw1", group=g_pdhl)
+i_pwhCol  = input.color(color.new(#2962ff, 0), "", inline="pw1", group=g_pdhl)
+i_showPWL = input.bool(true, "Show PWL", inline="pw2", group=g_pdhl)
+i_pwlCol  = input.color(color.new(#2962ff, 0), "", inline="pw2", group=g_pdhl)
+i_pdhlStyle  = input.string("Dashed", "Line Style", options=["Solid", "Dashed", "Dotted"], group=g_pdhl)
+i_pdhlWidth  = input.int(1, "Line Width", minval=1, maxval=5, group=g_pdhl)
+i_pdhlLabels = input.bool(true, "Show Labels", group=g_pdhl)
+i_pdhlExtend = input.string("Right", "Extend Mode", options=["None", "Right"], group=g_pdhl)
+i_pdhlAutoHide = input.bool(false, "Auto-Hide After Sweep", group=g_pdhl)
+
+// ───────────────────────────── NDOG / NWOG ─────────────────────────────
+i_showNDOG   = input.bool(true, "Show NDOG", group=g_gap)
+i_showNWOG   = input.bool(true, "Show NWOG", group=g_gap)
+i_ndogCol    = input.color(#23de19, "NDOG Color", group=g_gap)
+i_nwogCol    = input.color(#b8b8b8, "NWOG Color", group=g_gap)
+i_gapTransp  = input.int(85, "Fill Transparency", minval=0, maxval=100, group=g_gap)
+i_gapExtend  = input.string("Extend Live", "Extend Mode", options=["Extend Live", "Extend Until Filled"], group=g_gap)
+i_gapMidpoint= input.bool(true, "Show Midpoint", group=g_gap)
+i_gapLabels  = input.bool(true, "Show Labels", group=g_gap)
+i_gapFillMode= input.string("Full Fill", "Consider 'Filled' When", options=["Touch", "Midpoint Fill", "Full Fill"], group=g_gap)
+i_gapRemoveOnFill = input.bool(false, "Remove Gap Once Filled (else greys out)", group=g_gap)
+
+// ───────────────────────────── OBJECT LIMITS ─────────────────────────────
+i_maxLevels  = input.int(6, "Max Historical Levels (True Opens / PDHL)", minval=1, maxval=50, group=g_lim)
+i_maxGaps    = input.int(6, "Max Historical Gaps (NDOG/NWOG)", minval=1, maxval=50, group=g_lim)
+i_maxSignals = input.int(20, "Max Historical Signals (SSMT/CISD/Turtle Soup)", minval=1, maxval=100, group=g_lim)
+i_showDeveloping = input.bool(false, "Show Developing (Unconfirmed) Signals", group=g_lim)
+
+// ════════════════════════════════════════════════════════════════════════════
+//  SHARED HELPERS
+// ════════════════════════════════════════════════════════════════════════════
+f_lineStyle(string s) =>
+    switch s
+        "Solid"  => line.style_solid
+        "Dashed" => line.style_dashed
+        "Dotted" => line.style_dotted
+        => line.style_solid
+
+f_trimLines(array<line> arr, int maxN) =>
+    while array.size(arr) > maxN
+        line.delete(array.shift(arr))
+
+f_trimLabels(array<label> arr, int maxN) =>
+    while array.size(arr) > maxN
+        label.delete(array.shift(arr))
+
+f_trimBoxes(array<box> arr, int maxN) =>
+    while array.size(arr) > maxN
+        box.delete(array.shift(arr))
+
+var float g_atr14 = na
+g_atr14 := ta.atr(14)
+
+// ════════════════════════════════════════════════════════════════════════════
+//  MODULE 1 — MULTI-TIMEFRAME CANDLE ENGINE (90M / 6H / DAILY)
+// ════════════════════════════════════════════════════════════════════════════
+type TFColors
+    color bullBody
+    color bearBody
+    color bullBorder
+    color bearBorder
+    color bullWick
+    color bearWick
+
+string auto_base_tf = timeframe.in_seconds() < 900 ? timeframe.period : "15"
+
+var array<float> g_o15 = array.new<float>()
+var array<float> g_h15 = array.new<float>()
+var array<float> g_l15 = array.new<float>()
+var array<float> g_c15 = array.new<float>()
+var array<int>   g_t15 = array.new<int>()
+
+[o15, h15, l15, c15, t15] = request.security_lower_tf(syminfo.tickerid, auto_base_tf, [open, high, low, close, time])
+
+f_pushArr(src, dst) =>
+    if array.size(src) > 0
+        for i = 0 to array.size(src) - 1
+            array.push(dst, array.get(src, i))
+
+f_pushArr(o15, g_o15), f_pushArr(h15, g_h15), f_pushArr(l15, g_l15), f_pushArr(c15, g_c15), f_pushArr(t15, g_t15)
+
+f_clipArr(arr, maxBars) =>
+    if array.size(arr) > maxBars
+        int excess = array.size(arr) - maxBars
+        for i = 1 to excess
+            array.shift(arr)
+
+f_clipArr(g_o15, 5000), f_clipArr(g_h15, 5000), f_clipArr(g_l15, 5000), f_clipArr(g_c15, 5000), f_clipArr(g_t15, 5000)
+
+// Aggregate a custom higher timeframe (in minutes) anchored to effHr:effMin, keeping the last 5 bars, OHLC
+f_getCustomHTF(int targetMins, array<int> arrT, array<float> arrO, array<float> arrH, array<float> arrL, array<float> arrC) =>
+    array<float> outO = array.new<float>()
+    array<float> outH = array.new<float>()
+    array<float> outL = array.new<float>()
+    array<float> outC = array.new<float>()
+    array<int>   outT = array.new<int>()
+    int sz = array.size(arrT)
+    if sz > 0
+        int lastOpen = -1
+        float curO = na
+        float curH = na
+        float curL = na
+        float curC = na
+        int curT = na
+        for i = sz - 1 to 0
+            int t = array.get(arrT, i)
+            int hNy = hour(t, "America/New_York")
+            int mNy = minute(t, "America/New_York")
+            int elapsed = hNy * 60 + mNy
+            int anchor  = effHr * 60 + effMin
+            int shift   = elapsed - anchor
+            if shift < 0
+                shift += 1440
+            int openTime = t - ((shift % targetMins) * 60000)
+            if openTime != lastOpen
+                if lastOpen != -1
+                    array.push(outO, curO), array.push(outH, curH), array.push(outL, curL), array.push(outC, curC), array.push(outT, curT)
+                    if array.size(outO) >= 5
+                        break
+                lastOpen := openTime
+                curC := array.get(arrC, i), curH := array.get(arrH, i), curL := array.get(arrL, i), curO := array.get(arrO, i), curT := openTime
+            else
+                curH := math.max(curH, array.get(arrH, i)), curL := math.min(curL, array.get(arrL, i)), curO := array.get(arrO, i)
+        if array.size(outO) < 5 and lastOpen != -1
+            array.push(outO, curO), array.push(outH, curH), array.push(outL, curL), array.push(outC, curC), array.push(outT, curT)
+    while array.size(outO) < 5
+        array.push(outO, na), array.push(outH, na), array.push(outL, na), array.push(outC, na), array.push(outT, na)
+    [outO, outH, outL, outC, outT]
+
+[o90, h90, l90, c90, t90]   = f_getCustomHTF(90,   g_t15, g_o15, g_h15, g_l15, g_c15)
+[o6h, h6h, l6h, c6h, t6h]   = f_getCustomHTF(360,  g_t15, g_o15, g_h15, g_l15, g_c15)
+[o1d, h1d, l1d, c1d, t1d]   = f_getCustomHTF(1440, g_t15, g_o15, g_h15, g_l15, g_c15)   // replaces the old 7H block
+
+var array<box>  g_bodies   = array.new<box>()
+var array<line> g_wicksUp  = array.new<line>()
+var array<line> g_wicksDn  = array.new<line>()
+var label g_lbl90 = na
+var label g_lbl6h = na
+var label g_lbl1d = na
+
+remainingTime(int openTime, int targetMins) =>
+    string result = na
+    if barstate.isrealtime and not na(openTime)
+        int closeTime = openTime + (targetMins * 60000)
+        int rem = math.max(0, int((closeTime - timenow) / 1000))
+        int h = int(rem / 3600)
+        int m = int((rem - h * 3600) / 60)
+        int s = int(rem - h * 3600 - m * 60)
+        result := str.tostring(h, "00") + ":" + str.tostring(m, "00") + ":" + str.tostring(s, "00")
+    else
+        result := "n/a"
+    result
+
+f_deleteAllCandles() =>
+    while array.size(g_bodies) > 0
+        box.delete(array.pop(g_bodies))
+    while array.size(g_wicksUp) > 0
+        line.delete(array.pop(g_wicksUp))
+    while array.size(g_wicksDn) > 0
+        line.delete(array.pop(g_wicksDn))
+
+drawCandle(float o, float h, float l, float c, int slot, int startOff, TFColors col) =>
+    int x1 = bar_index + startOff + slot * (i_width + i_buffer)
+    int x2 = x1 + i_width
+    int xm = x1 + i_width / 2
+    bool bull = c >= o
+    box bd = box.new(x1, math.max(o, c), x2, math.min(o, c), bull ? col.bullBorder : col.bearBorder, 1,
+         bgcolor = bull ? col.bullBody : col.bearBody)
+    line wu = line.new(xm, h, xm, math.max(o, c), color = bull ? col.bullWick : col.bearWick)
+    line wd = line.new(xm, math.min(o, c), xm, l, color = bull ? col.bullWick : col.bearWick)
+    array.push(g_bodies, bd)
+    array.push(g_wicksUp, wu)
+    array.push(g_wicksDn, wd)
+    [x1, x2]
+
+drawBlock(array<float> oArr, array<float> hArr, array<float> lArr, array<float> cArr, int startOff, int n, TFColors col) =>
+    float blockHigh = 0.0
+    int centerX = bar_index + startOff
+    if n > 0
+        int si = 5 - n
+        int slot = 0
+        while slot < n
+            int idx = si + slot
+            float co = array.get(oArr, idx)
+            float ch = array.get(hArr, idx)
+            float cl = array.get(lArr, idx)
+            float cc = array.get(cArr, idx)
+            if not na(co)
+                [x1, x2] = drawCandle(co, ch, cl, cc, slot, startOff, col)
+                if ch > blockHigh
+                    blockHigh := ch
+            slot += 1
+        int totalW = n * i_width + math.max(0, n - 1) * i_buffer
+        centerX := bar_index + startOff + totalW / 2
+        [centerX, blockHigh, startOff + totalW + i_htfgap]
+    else
+        [centerX, blockHigh, startOff + i_htfgap]
+
+TFColors col90m = TFColors.new(i_90mBullBody, i_90mBearBody, i_90mBullBrd, i_90mBearBrd, i_90mBullWick, i_90mBearWick)
+TFColors col6h  = TFColors.new(i_6hBullBody,  i_6hBearBody,  i_6hBullBrd,  i_6hBearBrd,  i_6hBullWick,  i_6hBearWick)
+TFColors col1d  = TFColors.new(i_1dBullBody,  i_1dBearBody,  i_1dBullBrd,  i_1dBearBrd,  i_1dBullWick,  i_1dBearWick)
+
+if barstate.islast
+    f_deleteAllCandles()
+    int n = math.min(i_maxshow, 5)
+    int off = i_offset
+
+    if i_show90m and timeframe.in_seconds() <= 90 * 60
+        [cx, top, nextOff] = drawBlock(o90, h90, l90, c90, off, n, col90m)
+        if i_showLabel
+            string txt = "TF: 90M" + (i_showTimer ? "\n[" + remainingTime(array.get(t90, 0), 90) + "]" : "")
+            if na(g_lbl90)
+                g_lbl90 := label.new(cx, top, txt, color=color.new(color.white, 100), textcolor=color.gray, style=label.style_label_down, size=size.small, text_font_family=font.family_monospace)
+            else
+                label.set_xy(g_lbl90, cx, top)
+                label.set_text(g_lbl90, txt)
+        off := nextOff
+
+    if i_show6h and timeframe.in_seconds() <= 360 * 60
+        [cx, top, nextOff] = drawBlock(o6h, h6h, l6h, c6h, off, n, col6h)
+        if i_showLabel
+            string txt = "TF: 6H" + (i_showTimer ? "\n[" + remainingTime(array.get(t6h, 0), 360) + "]" : "")
+            if na(g_lbl6h)
+                g_lbl6h := label.new(cx, top, txt, color=color.new(color.white, 100), textcolor=color.gray, style=label.style_label_down, size=size.small, text_font_family=font.family_monospace)
+            else
+                label.set_xy(g_lbl6h, cx, top)
+                label.set_text(g_lbl6h, txt)
+        off := nextOff
+
+    if i_show1d and timeframe.in_seconds() <= 1440 * 60
+        [cx, top, nextOff] = drawBlock(o1d, h1d, l1d, c1d, off, n, col1d)
+        if i_showLabel
+            string txt = "TF: D" + (i_showTimer ? "\n[" + remainingTime(array.get(t1d, 0), 1440) + "]" : "")
+            if na(g_lbl1d)
+                g_lbl1d := label.new(cx, top, txt, color=color.new(color.white, 100), textcolor=color.gray, style=label.style_label_down, size=size.small, text_font_family=font.family_monospace)
+            else
+                label.set_xy(g_lbl1d, cx, top)
+                label.set_text(g_lbl1d, txt)
+
+// ════════════════════════════════════════════════════════════════════════════
+//  MODULE 2 — SSMT / PSP DIVERGENCE (structural: pivot sweep vs. failure to sweep)
+// ════════════════════════════════════════════════════════════════════════════
+f_autoSSMT() =>
+    string t = str.upper(syminfo.root != "" ? syminfo.root : syminfo.ticker)
+    string s1 = ""
+    string s2 = ""
+    bool inv1 = false
+    bool inv2 = false
+    if str.contains(t, "NQ") or str.contains(t, "MNQ")
+        s1 := "CME_MINI:ES1!", s2 := "CBOT_MINI:YM1!"
+    else if str.contains(t, "ES") or str.contains(t, "MES")
+        s1 := "CME_MINI:NQ1!", s2 := "CBOT_MINI:YM1!"
+    else if str.contains(t, "YM") or str.contains(t, "MYM")
+        s1 := "CME_MINI:ES1!", s2 := "CME_MINI:NQ1!"
+    else if str.contains(t, "BTC")
+        s1 := "ETHUSDT", s2 := ""
+    else if str.contains(t, "ETH")
+        s1 := "BTCUSDT", s2 := ""
+    else if t == "EURUSD"
+        s1 := "GBPUSD", s2 := "TVC:DXY", inv2 := true
+    else if t == "GBPUSD"
+        s1 := "EURUSD", s2 := "TVC:DXY", inv2 := true
+    else if t == "XAUUSD"
+        s1 := "XAGUSD", s2 := "TVC:DXY", inv2 := true
+    else if t == "XAGUSD"
+        s1 := "XAUUSD", s2 := "TVC:DXY", inv2 := true
+    else
+        s1 := "", s2 := ""
+    [s1, s2, inv1, inv2]
+
+[autoS1, autoS2, autoInv1, autoInv2] = f_autoSSMT()
+string ssmtSym1 = i_ssmtAutoSym ? autoS1 : i_ssmtSym1
+string ssmtSym2 = i_ssmtAutoSym ? autoS2 : i_ssmtSym2
+bool   ssmtInv1 = i_ssmtAutoSym ? autoInv1 : i_ssmtInv1
+bool   ssmtInv2 = i_ssmtAutoSym ? autoInv2 : i_ssmtInv2
+
+[corrH1, corrL1] = request.security(ssmtSym1 != "" ? ssmtSym1 : syminfo.tickerid, timeframe.period, [high, low], ignore_invalid_symbol=true)
+[corrH2, corrL2] = request.security(ssmtSym2 != "" ? ssmtSym2 : syminfo.tickerid, timeframe.period, [high, low], ignore_invalid_symbol=true)
+
+int ssmtRightReq = i_ssmtMode == "Strict" ? i_ssmtRight + 2 : i_ssmtMode == "Aggressive" ? math.max(1, i_ssmtRight - 1) : i_ssmtRight
+float ssmtThreshMult = i_ssmtMode == "Strict" ? i_ssmtMinAtr * 1.5 : i_ssmtMode == "Aggressive" ? i_ssmtMinAtr * 0.5 : i_ssmtMinAtr
+
+phMain = ta.pivothigh(high, i_ssmtLeft, ssmtRightReq)
+plMain = ta.pivotlow(low, i_ssmtLeft, ssmtRightReq)
+
+var float lastMainPH = na
+var float lastMainPL = na
+var float lastCorr1PH = na
+var float lastCorr1PL = na
+var float lastCorr2PH = na
+var float lastCorr2PL = na
+
+var array<line>  ssmtLines  = array.new<line>()
+var array<label> ssmtLabels = array.new<label>()
+
+if i_ssmtShow
+    if not na(phMain)
+        float corr1AtPivot = ssmtSym1 != "" ? (ssmtInv1 ? -corrH1[ssmtRightReq] : corrH1[ssmtRightReq]) : na
+        float corr2AtPivot = ssmtSym2 != "" ? (ssmtInv2 ? -corrH2[ssmtRightReq] : corrH2[ssmtRightReq]) : na
+        bool sweepMain = not na(lastMainPH) and phMain > lastMainPH and (phMain - lastMainPH) >= (g_atr14 * ssmtThreshMult)
+        bool failCorr1 = ssmtSym1 != "" and not na(lastCorr1PH) and not na(corr1AtPivot) and corr1AtPivot <= lastCorr1PH
+        bool failCorr2 = ssmtSym2 != "" and not na(lastCorr2PH) and not na(corr2AtPivot) and corr2AtPivot <= lastCorr2PH
+        bool anyFail = (ssmtSym1 != "" and failCorr1) or (ssmtSym2 != "" and failCorr2)
+        if sweepMain and anyFail
+            int pivotBar = bar_index - ssmtRightReq
+            if i_ssmtShowLine
+                l = line.new(pivotBar, phMain, bar_index, phMain, color=i_ssmtBearCol, width=2)
+                array.push(ssmtLines, l)
+            if i_ssmtShowLbl
+                lb = label.new(pivotBar, phMain, "SSMT ▼", style=label.style_label_down, color=color.new(color.white, 100), textcolor=i_ssmtBearCol, size=size.small)
+                array.push(ssmtLabels, lb)
+            f_trimLines(ssmtLines, i_maxSignals)
+            f_trimLabels(ssmtLabels, i_maxSignals)
+        lastMainPH := phMain
+        if ssmtSym1 != "" and not na(corr1AtPivot)
+            lastCorr1PH := corr1AtPivot
+        if ssmtSym2 != "" and not na(corr2AtPivot)
+            lastCorr2PH := corr2AtPivot
+
+    if not na(plMain)
+        float corr1AtPivotL = ssmtSym1 != "" ? (ssmtInv1 ? -corrL1[ssmtRightReq] : corrL1[ssmtRightReq]) : na
+        float corr2AtPivotL = ssmtSym2 != "" ? (ssmtInv2 ? -corrL2[ssmtRightReq] : corrL2[ssmtRightReq]) : na
+        bool sweepMainL = not na(lastMainPL) and plMain < lastMainPL and (lastMainPL - plMain) >= (g_atr14 * ssmtThreshMult)
+        bool failCorr1L = ssmtSym1 != "" and not na(lastCorr1PL) and not na(corr1AtPivotL) and corr1AtPivotL >= lastCorr1PL
+        bool failCorr2L = ssmtSym2 != "" and not na(lastCorr2PL) and not na(corr2AtPivotL) and corr2AtPivotL >= lastCorr2PL
+        bool anyFailL = (ssmtSym1 != "" and failCorr1L) or (ssmtSym2 != "" and failCorr2L)
+        if sweepMainL and anyFailL
+            int pivotBarL = bar_index - ssmtRightReq
+            if i_ssmtShowLine
+                l2 = line.new(pivotBarL, plMain, bar_index, plMain, color=i_ssmtBullCol, width=2)
+                array.push(ssmtLines, l2)
+            if i_ssmtShowLbl
+                lb2 = label.new(pivotBarL, plMain, "SSMT ▲", style=label.style_label_up, color=color.new(color.white, 100), textcolor=i_ssmtBullCol, size=size.small)
+                array.push(ssmtLabels, lb2)
+            f_trimLines(ssmtLines, i_maxSignals)
+            f_trimLabels(ssmtLabels, i_maxSignals)
+        lastMainPL := plMain
+        if ssmtSym1 != "" and not na(corr1AtPivotL)
+            lastCorr1PL := corr1AtPivotL
+        if ssmtSym2 != "" and not na(corr2AtPivotL)
+            lastCorr2PL := corr2AtPivotL
+
+// ════════════════════════════════════════════════════════════════════════════
+//  MODULE 3 — TRUE OPENS
+// ════════════════════════════════════════════════════════════════════════════
+f_isStart(string sessStr) =>
+    t = time(timeframe.period, sessStr, "America/New_York")
+    not na(t) and na(t[1])
+
+isTrueDay  = f_isStart("0000-0001:1234567")
+isTrueWeek = f_isStart("1800-1801:2")
+nyMonth    = month(time, "America/New_York")
+var int mondayCount = 0
+if nyMonth != nyMonth[1]
+    mondayCount := 0
+if isTrueWeek
+    mondayCount += 1
+isTrueMonth = isTrueWeek and mondayCount == 2
+
+isAsiaOpen   = i_toShowSess ? f_isStart("1930-1931:1234567") : false
+isLondonOpen = i_toShowSess ? f_isStart("0130-0131:1234567") : false
+isNYAMOpen   = i_toShowSess ? f_isStart("0730-0731:1234567") : false
+isNYPMOpen   = i_toShowSess ? f_isStart("1330-1331:1234567") : false
+
+f_trueOpenDraw(array<line> lns, array<label> lbs, bool trigger, float price, string txt, color col) =>
+    if trigger
+        ln = line.new(bar_index, price, bar_index, price, color=col, width=i_toWidth, style=f_lineStyle(i_toStyle))
+        array.push(lns, ln)
+        if i_toLabels
+            lb = label.new(bar_index, price, txt, color=color.new(col, 100), textcolor=col, style=label.style_label_left, size=size.small)
+            array.push(lbs, lb)
+        f_trimLines(lns, 1)
+        f_trimLabels(lbs, 1)
+    if i_toExtend and array.size(lns) > 0
+        line.set_x2(array.get(lns, array.size(lns) - 1), bar_index)
+        if i_toLabels and array.size(lbs) > 0
+            label.set_x(array.get(lbs, array.size(lbs) - 1), bar_index)
+
+var array<line>  toDayLn = array.new<line>()
+var array<label> toDayLb = array.new<label>()
+var array<line>  toWeekLn = array.new<line>()
+var array<label> toWeekLb = array.new<label>()
+var array<line>  toMonthLn = array.new<line>()
+var array<label> toMonthLb = array.new<label>()
+var array<line>  toAsiaLn = array.new<line>()
+var array<label> toAsiaLb = array.new<label>()
+var array<line>  toLondonLn = array.new<line>()
+var array<label> toLondonLb = array.new<label>()
+var array<line>  toNYAMLn = array.new<line>()
+var array<label> toNYAMLb = array.new<label>()
+var array<line>  toNYPMLn = array.new<line>()
+var array<label> toNYPMLb = array.new<label>()
+
+if i_toShowDay
+    f_trueOpenDraw(toDayLn, toDayLb, isTrueDay, open, "DO", i_toColor)
+if i_toShowWeek
+    f_trueOpenDraw(toWeekLn, toWeekLb, isTrueWeek, open, "WO", i_toColor)
+if i_toShowMonth
+    f_trueOpenDraw(toMonthLn, toMonthLb, isTrueMonth, open, "MO", i_toColor)
+if i_toShowSess
+    f_trueOpenDraw(toAsiaLn, toAsiaLb, isAsiaOpen, open, "Asia Open", i_toColor)
+    f_trueOpenDraw(toLondonLn, toLondonLb, isLondonOpen, open, "London Open", i_toColor)
+    f_trueOpenDraw(toNYAMLn, toNYAMLb, isNYAMOpen, open, "NY AM Open", i_toColor)
+    f_trueOpenDraw(toNYPMLn, toNYPMLb, isNYPMOpen, open, "NY PM Open", i_toColor)
+
+// ════════════════════════════════════════════════════════════════════════════
+//  MODULE 4 — CISD / TCISD  (body-based change in state of delivery)
+// ════════════════════════════════════════════════════════════════════════════
+type CISDLevel
+    line  lvl
+    label lbl
+    bool  bullish
+    bool  completed
+
+bodyHigh(int off) => math.max(open[off], close[off])
+bodyLow(int off)  => math.min(open[off], close[off])
+
+var float pendingTop = na
+var float pendingBot = na
+var int   pendingTopBar = na
+var int   pendingBotBar = na
+var bool  inBearPullback = false
+var bool  inBullPullback = false
+
+var array<CISDLevel> cisdBull = array.new<CISDLevel>()
+var array<CISDLevel> cisdBear = array.new<CISDLevel>()
+
+f_cisdTrim(array<CISDLevel> arr, int maxN) =>
+    while array.size(arr) > maxN
+        CISDLevel old = array.shift(arr)
+        line.delete(old.lvl)
+        label.delete(old.lbl)
+
+if i_cisdShow
+    bool greenPrev = close[1] > open[1]
+    bool redPrev   = close[1] < open[1]
+
+    // bearish pullback (green candle) sets up a potential bullish CISD level at its open
+    if greenPrev and not inBearPullback
+        inBearPullback := true
+        pendingTop := open[1]
+        pendingTopBar := bar_index[1]
+    if inBearPullback and open > pendingTop
+        pendingTop := open
+        pendingTopBar := bar_index
+
+    // bullish pullback (red candle) sets up a potential bearish CISD level at its open
+    if redPrev and not inBullPullback
+        inBullPullback := true
+        pendingBot := open[1]
+        pendingBotBar := bar_index[1]
+    if inBullPullback and open < pendingBot
+        pendingBot := open
+        pendingBotBar := bar_index
+
+    float dispThresh = i_cisdMinDisp * g_atr14
+    float confirmClose = close
+    float confirmHigh   = i_cisdWickMode ? high : close
+    float confirmLow    = i_cisdWickMode ? low  : close
+
+    // bullish CISD: displacement close above pendingTop
+    if inBearPullback and not na(pendingTop) and confirmHigh > pendingTop + dispThresh
+        ln = line.new(pendingTopBar, pendingTop, bar_index, pendingTop, color=i_cisdBullCol, width=1)
+        lb = label.new(bar_index, pendingTop, "CISD ▲", color=color.new(color.white, 100), textcolor=i_cisdBullCol, style=label.style_label_left, size=size.small)
+        array.push(cisdBull, CISDLevel.new(ln, lb, true, false))
+        f_cisdTrim(cisdBull, i_maxSignals)
+        inBearPullback := false
+
+    // bearish CISD: displacement close below pendingBot
+    if inBullPullback and not na(pendingBot) and confirmLow < pendingBot - dispThresh
+        ln2 = line.new(pendingBotBar, pendingBot, bar_index, pendingBot, color=i_cisdBearCol, width=1)
+        lb2 = label.new(bar_index, pendingBot, "CISD ▼", color=color.new(color.white, 100), textcolor=i_cisdBearCol, style=label.style_label_left, size=size.small)
+        array.push(cisdBear, CISDLevel.new(ln2, lb2, false, false))
+        f_cisdTrim(cisdBear, i_maxSignals)
+        inBullPullback := false
+
+    // extend + mitigate
+    if i_cisdExtend
+        if array.size(cisdBull) > 0
+            CISDLevel lastBu = array.get(cisdBull, array.size(cisdBull) - 1)
+            if not lastBu.completed
+                if bodyLow(0) < line.get_y2(lastBu.lvl)
+                    lastBu.completed := true
+                else
+                    line.set_x2(lastBu.lvl, bar_index)
+                    label.set_x(lastBu.lbl, bar_index)
+        if array.size(cisdBear) > 0
+            CISDLevel lastBe = array.get(cisdBear, array.size(cisdBear) - 1)
+            if not lastBe.completed
+                if bodyHigh(0) > line.get_y2(lastBe.lvl)
+                    lastBe.completed := true
+                else
+                    line.set_x2(lastBe.lvl, bar_index)
+                    label.set_x(lastBe.lbl, bar_index)
+
+// ---- TCISD: same logic, computed on a higher timeframe via request.security ----
+[tOpen, tClose, tHigh, tLow] = request.security(syminfo.tickerid, i_tcisdTF, [open, close, high, low], lookahead=barmerge.lookahead_off)
+var float tPendingTop = na
+var float tPendingBot = na
+var bool  tInBear = false
+var bool  tInBull = false
+var array<line>  tcisdLines = array.new<line>()
+var array<label> tcisdLabels = array.new<label>()
+
+if i_tcisdShow
+    bool newTBar = ta.change(tOpen) != 0 or barstate.isfirst
+    if newTBar
+        bool tGreenPrev = tClose[1] > tOpen[1]
+        bool tRedPrev   = tClose[1] < tOpen[1]
+        if tGreenPrev and not tInBear
+            tInBear := true
+            tPendingTop := tOpen[1]
+        if tRedPrev and not tInBull
+            tInBull := true
+            tPendingBot := tOpen[1]
+    if tInBear and not na(tPendingTop) and tClose > tPendingTop
+        ln3 = line.new(bar_index - 1, tPendingTop, bar_index, tPendingTop, color=i_tcisdBullCol, width=2, style=line.style_dashed)
+        lb3 = label.new(bar_index, tPendingTop, "TCISD ▲", color=color.new(color.white, 100), textcolor=i_tcisdBullCol, style=label.style_label_left, size=size.small)
+        array.push(tcisdLines, ln3), array.push(tcisdLabels, lb3)
+        f_trimLines(tcisdLines, i_maxSignals), f_trimLabels(tcisdLabels, i_maxSignals)
+        tInBear := false
+    if tInBull and not na(tPendingBot) and tClose < tPendingBot
+        ln4 = line.new(bar_index - 1, tPendingBot, bar_index, tPendingBot, color=i_tcisdBearCol, width=2, style=line.style_dashed)
+        lb4 = label.new(bar_index, tPendingBot, "TCISD ▼", color=color.new(color.white, 100), textcolor=i_tcisdBearCol, style=label.style_label_left, size=size.small)
+        array.push(tcisdLines, ln4), array.push(tcisdLabels, lb4)
+        f_trimLines(tcisdLines, i_maxSignals), f_trimLabels(tcisdLabels, i_maxSignals)
+        tInBull := false
+
+// ════════════════════════════════════════════════════════════════════════════
+//  MODULE 5 — TURTLE SOUP
+// ════════════════════════════════════════════════════════════════════════════
+type TSSetup
+    float level
+    int   sweepBar
+    bool  isBearish
+    bool  resolved
+
+var array<TSSetup> tsSetups = array.new<TSSetup>()
+var array<line>  tsLines = array.new<line>()
+var array<label> tsLabels = array.new<label>()
+
+phTS = ta.pivothigh(high, i_tsPivotL, i_tsPivotL)
+plTS = ta.pivotlow(low, i_tsPivotL, i_tsPivotL)
+
+var float lastSwingHigh = na
+var float lastSwingLow  = na
+
+if i_tsShow
+    if not na(phTS)
+        lastSwingHigh := phTS
+    if not na(plTS)
+        lastSwingLow := plTS
+
+    // detect a sweep of the last confirmed swing high, then look for rejection back below
+    bool sweptHigh = not na(lastSwingHigh) and high > lastSwingHigh + (g_atr14 * i_tsMinSweep)
+    bool sweptLow  = not na(lastSwingLow)  and low  < lastSwingLow  - (g_atr14 * i_tsMinSweep)
+
+    if sweptHigh
+        array.push(tsSetups, TSSetup.new(lastSwingHigh, bar_index, true, false))
+        if i_tsShowSweep
+            sl = line.new(bar_index, lastSwingHigh, bar_index, lastSwingHigh, color=i_tsBearCol, width=1, style=line.style_dotted)
+            array.push(tsLines, sl)
+
+    if sweptLow
+        array.push(tsSetups, TSSetup.new(lastSwingLow, bar_index, false, false))
+        if i_tsShowSweep
+            sl2 = line.new(bar_index, lastSwingLow, bar_index, lastSwingLow, color=i_tsBullCol, width=1, style=line.style_dotted)
+            array.push(tsLines, sl2)
+
+    if array.size(tsSetups) > 0
+        for i = array.size(tsSetups) - 1 to 0
+            TSSetup s = array.get(tsSetups, i)
+            if not s.resolved
+                int barsSince = bar_index - s.sweepBar
+                if barsSince > i_tsMaxBars
+                    s.resolved := true
+                else
+                    bool rejectBear = s.isBearish and (
+                         i_tsMode == "Wick Rejection" ? low < s.level :
+                         i_tsMode == "Close Rejection" ? close < s.level :
+                         close < s.level and close < open)
+                    bool rejectBull = (not s.isBearish) and (
+                         i_tsMode == "Wick Rejection" ? high > s.level :
+                         i_tsMode == "Close Rejection" ? close > s.level :
+                         close > s.level and close > open)
+                    if rejectBear
+                        s.resolved := true
+                        if i_tsShowMark
+                            m = label.new(bar_index, high, "Turtle Soup ▼", style=label.style_label_down, color=color.new(color.white, 100), textcolor=i_tsBearCol, size=size.small)
+                            array.push(tsLabels, m)
+                        if i_tsShowStop
+                            stopL = line.new(s.sweepBar, s.level, bar_index, s.level, color=i_tsBearCol, width=1)
+                            array.push(tsLines, stopL)
+                    else if rejectBull
+                        s.resolved := true
+                        if i_tsShowMark
+                            m2 = label.new(bar_index, low, "Turtle Soup ▲", style=label.style_label_up, color=color.new(color.white, 100), textcolor=i_tsBullCol, size=size.small)
+                            array.push(tsLabels, m2)
+                        if i_tsShowStop
+                            stopL2 = line.new(s.sweepBar, s.level, bar_index, s.level, color=i_tsBullCol, width=1)
+                            array.push(tsLines, stopL2)
+    while array.size(tsSetups) > i_maxSignals
+        array.shift(tsSetups)
+    f_trimLines(tsLines, i_maxSignals)
+    f_trimLabels(tsLabels, i_maxSignals)
+
+// ════════════════════════════════════════════════════════════════════════════
+//  MODULE 6 — PDH / PDL / PWH / PWL
+// ════════════════════════════════════════════════════════════════════════════
+[pdh, pdl] = request.security(syminfo.tickerid, "D", [high[1], low[1]], lookahead=barmerge.lookahead_on)
+[pwh, pwl] = request.security(syminfo.tickerid, "W", [high[1], low[1]], lookahead=barmerge.lookahead_on)
+bool newDay  = ta.change(time("D")) != 0
+bool newWeek = ta.change(time("W")) != 0
+
+var line pdhLn = na
+var line pdlLn = na
+var line pwhLn = na
+var line pwlLn = na
+var label pdhLb = na
+var label pdlLb = na
+var label pwhLb = na
+var label pwlLb = na
+var bool pdhSwept = false
+var bool pdlSwept = false
+var bool pwhSwept = false
+var bool pwlSwept = false
+
+f_drawPDHL(show, isNewPeriod, price, ln, lb, col, txt, swept) =>
+    if show and not swept
+        if isNewPeriod or na(ln)
+            if not na(ln)
+                line.delete(ln)
+            if not na(lb)
+                label.delete(lb)
+            ln := line.new(bar_index, price, bar_index, price, color=col, width=i_pdhlWidth, style=f_lineStyle(i_pdhlStyle),
+                 extend = i_pdhlExtend == "Right" ? extend.right : extend.none)
+            if i_pdhlLabels
+                lb := label.new(bar_index, price, txt, color=color.new(col, 100), textcolor=col, style=label.style_label_left, size=size.small)
+        else
+            line.set_y1(ln, price), line.set_y2(ln, price)
+            if not na(lb)
+                label.set_y(lb, price)
+    [ln, lb]
+
+if newDay
+    pdhSwept := false
+    pdlSwept := false
+if newWeek
+    pwhSwept := false
+    pwlSwept := false
+
+if i_showPDH and not na(pdh)
+    [pdhLn, pdhLb] := f_drawPDHL(true, newDay, pdh, pdhLn, pdhLb, i_pdhCol, "PDH", pdhSwept)
+    if i_pdhlAutoHide and high > pdh
+        pdhSwept := true
+if i_showPDL and not na(pdl)
+    [pdlLn, pdlLb] := f_drawPDHL(true, newDay, pdl, pdlLn, pdlLb, i_pdlCol, "PDL", pdlSwept)
+    if i_pdhlAutoHide and low < pdl
+        pdlSwept := true
+if i_showPWH and not na(pwh)
+    [pwhLn, pwhLb] := f_drawPDHL(true, newWeek, pwh, pwhLn, pwhLb, i_pwhCol, "PWH", pwhSwept)
+    if i_pdhlAutoHide and high > pwh
+        pwhSwept := true
+if i_showPWL and not na(pwl)
+    [pwlLn, pwlLb] := f_drawPDHL(true, newWeek, pwl, pwlLn, pwlLb, i_pwlCol, "PWL", pwlSwept)
+    if i_pdhlAutoHide and low < pwl
+        pwlSwept := true
+
+// ════════════════════════════════════════════════════════════════════════════
+//  MODULE 7 — NDOG / NWOG
+// ════════════════════════════════════════════════════════════════════════════
+type GapBox
+    box   b
+    line  mid
+    label lb
+    float top
+    float bot
+    bool  filled
+
+var array<GapBox> ndogArr = array.new<GapBox>()
+var array<GapBox> nwogArr = array.new<GapBox>()
+
+f_gapTrim(array<GapBox> arr, int maxN) =>
+    while array.size(arr) > maxN
+        GapBox old = array.shift(arr)
+        box.delete(old.b)
+        if not na(old.mid)
+            line.delete(old.mid)
+        if not na(old.lb)
+            label.delete(old.lb)
+
+[dOpen, dClosePrev] = request.security(syminfo.tickerid, "D", [open, close[1]], lookahead=barmerge.lookahead_on)
+[wOpen, wClosePrev] = request.security(syminfo.tickerid, "W", [open, close[1]], lookahead=barmerge.lookahead_on)
+
+f_createGap(array<GapBox> arr, float refClose, float refOpen, color col, string txt, int maxN) =>
+    if not na(refClose) and not na(refOpen) and refClose != refOpen
+        float top = math.max(refClose, refOpen)
+        float bot = math.min(refClose, refOpen)
+        b = box.new(bar_index - 1, top, bar_index + 1, bot, border_color=color.new(col, 60), bgcolor=color.new(col, i_gapTransp))
+        line mid = na
+        if i_gapMidpoint
+            mid := line.new(bar_index - 1, (top + bot) / 2, bar_index + 1, (top + bot) / 2, color=color.new(col, 40), style=line.style_dotted)
+        label lb = na
+        if i_gapLabels
+            lb := label.new(bar_index + 1, (top + bot) / 2, txt, color=color.new(color.white, 100), textcolor=col, style=label.style_label_left, size=size.small)
+        array.push(arr, GapBox.new(b, mid, lb, top, bot, false))
+        f_gapTrim(arr, maxN)
+
+if i_showNDOG and newDay
+    f_createGap(ndogArr, dClosePrev, dOpen, i_ndogCol, "NDOG", i_maxGaps)
+if i_showNWOG and newWeek
+    f_createGap(nwogArr, wClosePrev, wOpen, i_nwogCol, "NWOG", i_maxGaps)
+
+f_updateGaps(array<GapBox> arr) =>
+    if array.size(arr) > 0
+        for i = 0 to array.size(arr) - 1
+            GapBox g = array.get(arr, i)
+            bool isFilled = switch i_gapFillMode
+                "Touch"         => (low <= g.top and high >= g.bot)
+                "Midpoint Fill" => (low <= (g.top + g.bot) / 2 and g.top >= (g.top + g.bot) / 2)
+                "Full Fill"     => (low <= g.bot)
+                => false
+            if isFilled and not g.filled
+                g.filled := true
+                if i_gapRemoveOnFill
+                    box.delete(g.b)
+                    if not na(g.mid)
+                        line.delete(g.mid)
+                    if not na(g.lb)
+                        label.delete(g.lb)
+                else
+                    box.set_border_color(g.b, color.new(color.gray, 70))
+                    box.set_bgcolor(g.b, color.new(color.gray, 95))
+            if not g.filled or not i_gapRemoveOnFill
+                if i_gapExtend == "Extend Live" or not g.filled
+                    box.set_right(g.b, bar_index + 1)
+                    if not na(g.mid)
+                        line.set_x2(g.mid, bar_index + 1)
+                    if not na(g.lb)
+                        label.set_x(g.lb, bar_index + 1)
+
+f_updateGaps(ndogArr)
+f_updateGaps(nwogArr)
+
+// ════════════════════════════════════════════════════════════════════════════
+//  MODULE 8 — PERIOD SEPARATOR  (restored from original request)
+// ════════════════════════════════════════════════════════════════════════════
+g_sep = "Period Separator"
+i_sepShow    = input.bool(true, "Show Period Separator", group=g_sep)
+i_sepColor   = input.color(color.rgb(61, 61, 61), "Separator Color", group=g_sep)
+i_sepStyle   = input.string("Dotted", "Separator Style", options=["Solid", "Dashed", "Dotted"], group=g_sep)
+i_sepWidth   = input.int(1, "Separator Width", minval=1, group=g_sep)
+i_sepTF      = input.string("Auto", "Separator Timeframe (Auto = fractal)",
+     options=["Auto", "1", "3", "5", "15", "30", "45", "60", "120", "180", "240", "D", "W", "1M"], group=g_sep)
+i_sepMaxHist = input.int(50, "Max Historical Separators", minval=1, maxval=500, group=g_sep)
+
+f_autoMapSepTF(chartTf) =>
+    float ts = timeframe.in_seconds(chartTf)
+    string mapped = chartTf
+    if ts <= 60
+        mapped := "15"
+    else if ts <= 180
+        mapped := "30"
+    else if ts <= 300
+        mapped := "60"
+    else if ts <= 900
+        mapped := "240"
+    else if ts <= 3600
+        mapped := "D"
+    else if ts <= 14400
+        mapped := "W"
+    else if ts <= 604800
+        mapped := "1M"
+    mapped
+
+mappedSepTF = i_sepTF == "Auto" ? f_autoMapSepTF(timeframe.period) : i_sepTF
+
+var array<line> sepLines = array.new<line>()
+if i_sepShow and timeframe.in_seconds(timeframe.period) <= timeframe.in_seconds(mappedSepTF)
+    if timeframe.change(mappedSepTF)
+        newSep = line.new(bar_index, high + syminfo.mintick, bar_index, low, extend=extend.both,
+             color=i_sepColor, style=f_lineStyle(i_sepStyle), width=i_sepWidth)
+        array.push(sepLines, newSep)
+        f_trimLines(sepLines, i_sepMaxHist)
+
+// ════════════════════════════════════════════════════════════════════════════
+//  MODULE 9 — SESSION BOXES  (restored from original request, simplified to
+//  box + label; opening-range/fib/dashboard extras from the source bundle were
+//  a separate standalone indicator and are not re-added here — ask if you want
+//  those too)
+// ════════════════════════════════════════════════════════════════════════════
+g_sessbox = "Sessions"
+i_sessShow        = input.bool(true, "Enable Session Boxes", group=g_sessbox)
+i_sessTZ          = input.string("America/New_York", "Timezone",
+     options=["UTC", "America/New_York", "America/Chicago", "Europe/London", "Asia/Tokyo", "Australia/Sydney"], group=g_sessbox)
+i_sessBorderW     = input.int(1, "Border Width", minval=0, maxval=5, group=g_sessbox)
+i_sessBorderStyle = input.string("Solid", "Border Style", options=["Solid", "Dashed", "Dotted"], group=g_sessbox)
+i_sessTransp      = input.int(85, "Box Transparency", minval=0, maxval=100, group=g_sessbox)
+i_sessMaxHist     = input.int(10, "Max Historical Session Boxes (each)", minval=1, maxval=50, group=g_sessbox)
+i_sessLabels      = input.bool(true, "Show Session Labels", group=g_sessbox)
+
+i_showAsia = input.bool(true, "Asia Session", inline="sA", group=g_sessbox)
+i_asiaTime = input.session("1900-0000", "", inline="sA", group=g_sessbox)
+i_asiaCol  = input.color(color.rgb(255, 152, 0), "", inline="sA", group=g_sessbox)
+
+i_showLondon = input.bool(true, "London Session", inline="sL", group=g_sessbox)
+i_londonTime = input.session("0200-0500", "", inline="sL", group=g_sessbox)
+i_londonCol  = input.color(color.rgb(41, 98, 255), "", inline="sL", group=g_sessbox)
+
+i_showNY = input.bool(true, "New York Session", inline="sN", group=g_sessbox)
+i_nyTime = input.session("0700-1000", "", inline="sN", group=g_sessbox)
+i_nyCol  = input.color(color.rgb(0, 200, 83), "", inline="sN", group=g_sessbox)
+
+// Each call site below gets its OWN persistent var storage (Pine keeps var
+// state per call site), so one function safely drives all three sessions.
+f_sessionBox(show, sessStr, tz, col, transp, borderW, borderStyleStr, maxHist, showLabel, txt) =>
+    var array<box> boxes = array.new<box>()
+    var array<label> labels = array.new<label>()
+    var float topV = na
+    var float botV = na
+    t = time(timeframe.period, sessStr, tz)
+    isStart = not na(t) and na(t[1])
+    if show
+        if isStart
+            topV := high
+            botV := low
+            newBox = box.new(bar_index, high, bar_index, low, border_color=col, border_width=borderW,
+                 border_style=f_lineStyle(borderStyleStr), bgcolor=color.new(col, transp))
+            array.push(boxes, newBox)
+            f_trimBoxes(boxes, maxHist)
+            if showLabel
+                newLbl = label.new(bar_index, high, txt, color=color.new(color.white, 100), textcolor=col,
+                     style=label.style_label_down, size=size.small)
+                array.push(labels, newLbl)
+                f_trimLabels(labels, maxHist)
+        else if not na(t)
+            topV := math.max(topV, high)
+            botV := math.min(botV, low)
+            if array.size(boxes) > 0
+                lastBox = array.get(boxes, array.size(boxes) - 1)
+                box.set_top(lastBox, topV)
+                box.set_bottom(lastBox, botV)
+                box.set_right(lastBox, bar_index)
+            if showLabel and array.size(labels) > 0
+                lastLbl = array.get(labels, array.size(labels) - 1)
+                label.set_y(lastLbl, topV)
+    na
+
+if i_sessShow
+    f_sessionBox(i_showAsia, i_asiaTime, i_sessTZ, i_asiaCol, i_sessTransp, i_sessBorderW, i_sessBorderStyle, i_sessMaxHist, i_sessLabels, "Asia")
+    f_sessionBox(i_showLondon, i_londonTime, i_sessTZ, i_londonCol, i_sessTransp, i_sessBorderW, i_sessBorderStyle, i_sessMaxHist, i_sessLabels, "London")
+    f_sessionBox(i_showNY, i_nyTime, i_sessTZ, i_nyCol, i_sessTransp, i_sessBorderW, i_sessBorderStyle, i_sessMaxHist, i_sessLabels, "New York")
