@@ -1096,7 +1096,7 @@ f_get_started(_session) => na(_session[1]) and bool(_session)
 
 f_get_ended(_session) => na(_session) and bool(_session[1])
 
-f_message_limit_bars (_v) => '⚠️ This box\'s right position exceeds 500 bars(' + str.tostring(_v) + '). This box is not displayed correctly.'
+f_message_limit_bars (_v) => '⚠️ This box\'s "right position exceeds 500 bars"(' + str.tostring(_v) + '). This box is not displayed correctly.'
 
 f_set_line_x1 (_line, _x) =>
     if (line.get_x1(_line) != _x)
