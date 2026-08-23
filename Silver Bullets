@@ -1,0 +1,22 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © ddctv
+
+//@version=5
+indicator("Silver Bullets", overlay=true)
+
+//////////////////////////////
+// LIMIT TIME OF DAY WINDOW //
+//////////////////////////////
+
+transparency    = 90 // input.int(title="Time Filter background transparency", defval=95)
+gmtSelect       = input.string(title="Select Local Time Zone", defval="GMT-4", options=["GMT-12","GMT-11","GMT-10","GMT-9","GMT-8","GMT-7", "GMT-6", "GMT-5", "GMT-4", "GMT-3", "GMT-2", "GMT-1", "GMT", "GMT+1", "GMT+2",	"GMT+3","GMT+4","GMT+5","GMT+6","GMT+7","GMT+8","GMT+9","GMT+10","GMT+11","GMT+12","GMT+13","GMT+14"], confirm=true, group="Limit Time of Day Window")
+// === INPUT TIME RANGE ===
+betweenTime1     = input.session('2100-2200',  title = "AS Silver Bullet", group="Limit Time of Day Window")   // '0000-0000' is anytime to enter
+betweenTime2     = input.session('0300-0400',  title = "EU Silver Bullet", group="Limit Time of Day Window") 
+betweenTime3     = input.session('0900-1000',  title = "NY Silver Bullet", group="Limit Time of Day Window") 
+isTime(_position) =>                                                      // create function "within window of time"
+    isTime      = na(time(timeframe.period, _position + ':1234567', gmtSelect))               // current time is "within window of time"
+    
+bgcolor(color = isTime(betweenTime1) ? na : color.new(color.rgb(15, 15, 15, 42),transparency))
+bgcolor(color = isTime(betweenTime2) ? na : color.new(color.rgb(32, 51, 136, 18),transparency))
+bgcolor(color = isTime(betweenTime3) ? na : color.new(color.rgb(32, 156, 36, 6),transparency))
